@@ -371,6 +371,18 @@ python3 main.py
 | `ENABLE_LOGGING` | `boolean` | `false` | 是否启用运行日志（每次运行覆盖 LOG_FILE） |
 | `LOG_FILE` | `string` | `"cfnb.log"` | 运行日志文件名（仅在启用日志时生效） |
 
+#### 内置 CF 官方 IP 池（CFIP）
+
+> [!NOTE]
+> 当外部数据源全部失效、或希望完全离线自测时，可启用内置的 **CF 官方 IP 池**。它从 Cloudflare 官方 IP 段列表（自动联网拉取 `https://www.cloudflare.com/ips-v4`，或本地文件）中生成候选节点，再喂入本工具已有的 TCP / 可用性 / HTTP / 带宽流水线筛选。纯 Python 实现，无额外二进制依赖。
+
+| 参数 | 类型 | 默认值 | 说明 |
+| :--- | :--- | :--- | :--- |
+| `CFIP_ENABLED` | `boolean` | `false` | 是否启用内置 CF 官方 IP 池（作为外部数据源的兜底） |
+| `CFIP_IP_LIST` | `string` | `"https://www.cloudflare.com/ips-v4"` | CF IP 段来源：URL（在线拉取）或本地文件路径 |
+| `CFIP_PORT` | `int` | `443` | CF 池候选节点的测试端口 |
+| `CFIP_CAP` | `int` | `200` | CF 池最大候选节点数（限制 TCP 测试数量避免过慢） |
+
 ### IP 地区校准参数
 
 | 参数 | 类型 | 默认值 | 说明 |
