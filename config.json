@@ -93,6 +93,18 @@
     ],
     "_comment_ADDITIONAL_SOURCES": "所有数据源列表，每个对象包含 url 和 enabled。无需指定格式，程序完全自适应解析（支持标准代码、中文名、emoji国旗、JSON等）",
 
+    "CFIP_ENABLED": false,
+    "_comment_CFIP_ENABLED": "是否启用内置 CF 官方 IP 池（在外部数据源基础上额外加入，即使外部源失效也能产出候选节点）",
+
+    "CFIP_IP_LIST": "https://www.cloudflare.com/ips-v4",
+    "_comment_CFIP_IP_LIST": "CF 官方 IP 段来源：可填 URL（程序自动拉取缓存）或本地文件路径（可事先下载 cf-ips-v4.txt 避免每次联网）",
+
+    "CFIP_PORT": 443,
+    "_comment_CFIP_PORT": "CF 池候选节点的测试端口",
+
+    "CFIP_CAP": 200,
+    "_comment_CFIP_CAP": "CF 池最大候选节点数（限制后续 TCP 测试数量，避免全量 6000+ 段导致过慢）",
+
     "FETCH_MAX_RETRIES": 3,
     "_comment_FETCH_MAX_RETRIES": "获取节点列表失败时的最大重试次数",
 
@@ -126,7 +138,7 @@
     "LOG_FILE": "cfnb.log",
     "_comment_LOG_FILE": "运行日志文件名（仅在 ENABLE_LOGGING 为 true 时生效）",
 
-    "FORCE_DIRECT": true,
+    "FORCE_DIRECT": false,
     "_comment_FORCE_DIRECT": "是否强制所有网络请求直连（true=清除系统代理，全部直连）",
 
     "TEST_AVAILABILITY": true,

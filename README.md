@@ -306,7 +306,7 @@ python3 main.py
 
 | 参数 | 类型 | 默认值 | 说明 |
 | :--- | :--- | :--- | :--- |
-| `FORCE_DIRECT` | `boolean` | `true` | 是否强制所有网络请求直连（`true`=清除系统代理，全部走直连） |
+| `FORCE_DIRECT` | `boolean` | `false` | 是否强制所有网络请求直连（`true`=清除系统代理，全部走直连） |
 
 ### DNS 黑名单参数（仅作用于 DNS 更新环节）
 
@@ -370,6 +370,18 @@ python3 main.py
 | `OUTPUT_FILE` | `string` | `"ip.txt"` | 最终结果保存文件名 |
 | `ENABLE_LOGGING` | `boolean` | `false` | 是否启用运行日志（每次运行覆盖 LOG_FILE） |
 | `LOG_FILE` | `string` | `"cfnb.log"` | 运行日志文件名（仅在启用日志时生效） |
+
+#### 内置 CF 官方 IP 池（CFIP）
+
+> [!NOTE]
+> 当外部数据源全部失效、或希望完全离线自测时，可启用内置的 **CF 官方 IP 池**。它从 Cloudflare 官方 IP 段列表（自动联网拉取 `https://www.cloudflare.com/ips-v4`，或本地文件）中生成候选节点，再喂入本工具已有的 TCP / 可用性 / HTTP / 带宽流水线筛选。纯 Python 实现，无额外二进制依赖。
+
+| 参数 | 类型 | 默认值 | 说明 |
+| :--- | :--- | :--- | :--- |
+| `CFIP_ENABLED` | `boolean` | `false` | 是否启用内置 CF 官方 IP 池（作为外部数据源的兜底） |
+| `CFIP_IP_LIST` | `string` | `"https://www.cloudflare.com/ips-v4"` | CF IP 段来源：URL（在线拉取）或本地文件路径 |
+| `CFIP_PORT` | `int` | `443` | CF 池候选节点的测试端口 |
+| `CFIP_CAP` | `int` | `200` | CF 池最大候选节点数（限制 TCP 测试数量避免过慢） |
 
 ### IP 地区校准参数
 
@@ -758,7 +770,7 @@ git branch -M $(git remote show origin | grep "HEAD branch" | cut -d " " -f5) 2>
 | 测试阶段 | 是否走代理 | 说明 |
 | :--- | :--- | :--- |
 | TCP 延迟测试 (Socket) | ❌ 直连 | 反映本机到节点的 RTT |
-| HTTP 检测 (requests) | ✅ 跟随系统代理 | 过滤非Cloudflare节点 |
+| HTTP 检测 (requests) | ❌ 直连 | 过滤非Cloudflare节点 |
 | 带宽测速 (curl) | ❌ 直连 | 反映本机到 CDN 的速度 |
 | API 请求类 (requests) | ✅ 跟随系统代理 | 获取节点、可用性、微信通知等 |
 | Git 推送 (git) | ✅ 跟随系统代理 | 涉及 `github.com` 等 |

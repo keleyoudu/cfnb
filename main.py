@@ -208,6 +208,10 @@ def load_config():
         "CF_DNS_READ_TIMEOUT": 3,
         "DNS_RECORD_TYPE": "TXT",
         "ADDITIONAL_SOURCES": [],
+        "CFIP_ENABLED": False,
+        "CFIP_IP_LIST": "cf_ip_list.txt",
+        "CFIP_PORT": 443,
+        "CFIP_CAP": 200,
         "FETCH_MAX_RETRIES": 3,
         "FETCH_RETRY_DELAY": 3,
         "FETCH_TIMEOUT": 3,
@@ -219,7 +223,7 @@ def load_config():
         "OUTPUT_FILE": "ip.txt",
         "ENABLE_LOGGING": False,
         "LOG_FILE": "cfnb.log",
-        "FORCE_DIRECT": True,
+        "FORCE_DIRECT": False,
         "TEST_AVAILABILITY": True,
         "AVAILABILITY_CHECK_API": "https://api.090227.xyz/check",
         "AVAILABILITY_TIMEOUT": 3,
@@ -333,6 +337,10 @@ CF_DNS_CONNECT_TIMEOUT = cfg["CF_DNS_CONNECT_TIMEOUT"]
 CF_DNS_READ_TIMEOUT = cfg["CF_DNS_READ_TIMEOUT"]
 DNS_RECORD_TYPE = cfg["DNS_RECORD_TYPE"]
 ADDITIONAL_SOURCES = cfg["ADDITIONAL_SOURCES"]
+CFIP_ENABLED = cfg["CFIP_ENABLED"]
+CFIP_IP_LIST = cfg["CFIP_IP_LIST"]
+CFIP_PORT = cfg["CFIP_PORT"]
+CFIP_CAP = cfg["CFIP_CAP"]
 FETCH_MAX_RETRIES = cfg["FETCH_MAX_RETRIES"]
 FETCH_RETRY_DELAY = cfg["FETCH_RETRY_DELAY"]
 FETCH_TIMEOUT = cfg["FETCH_TIMEOUT"]
@@ -680,6 +688,66 @@ def fetch_additional_source(url):
             else:
                 print(f"已尝试 {FETCH_MAX_RETRIES} 次，放弃该数据源。")
                 return []
+
+# =========================== 内置 CF 官方 IP 池 ===========================
+def run_cfip_scan():
+    """从 CF 官方全量 IP 段列表生成候选节点，作为外部数据源的兜底节点池。
+
+    纯 Python 实现，无需外部二进制：
+      1. 若 CFIP_IP_LIST 是 http:// 开头则尝试在线拉取（如 https://www.cloudflare.com/ips-v4）
+      2. 否则读取本地文件（可提前下载保存，避免每次联网）
+      3. 把每段 CIDR 展开为可用主机地址，按 CFIP_CAP 限制返回候选 IP
+    返回节点列表: [("1.1.1.1:443", None, None, None), ...] 提供给主流程做延迟/测速筛选。
+    """
+    src = CFIP_IP_LIST
+    if src.startswith("http://") or src.startswith("https://"):
+        content = None
+        for attempt in range(1, FETCH_MAX_RETRIES + 1):
+            try:
+                print(f"[cf-pool] 正在从 {src} 拉取 CF 官方 IP 段 (尝试 {attempt}/{FETCH_MAX_RETRIES}) ...")
+                resp = requests.get(src, timeout=(FETCH_CONNECT_TIMEOUT, FETCH_TIMEOUT))
+                resp.raise_for_status()
+                content = resp.text
+                break
+            except Exception as e:
+                print(f"[cf-pool] 拉取失败: {e}")
+                if attempt < FETCH_MAX_RETRIES:
+                    time.sleep(FETCH_RETRY_DELAY)
+        if not content:
+            print("[cf-pool] 多次尝试拉取失败，跳过 CF 官方 IP 池。")
+            return []
+        lines = content.splitlines()
+        print(f"[cf-pool] 已获取 {len(lines)} 个 IP 段。")
+    else:
+        base = os.path.dirname(os.path.abspath(__file__))
+        path = src if os.path.isabs(src) else os.path.join(base, src)
+        if not os.path.exists(path):
+            print(f"[cf-pool] 未找到 IP 列表 {path}，跳过内置 CF 池。")
+            return []
+        with open(path, "r", encoding="utf-8", errors="ignore") as f:
+            lines = [ln.strip() for ln in f if ln.strip()]
+
+    candidate_ips = []
+    seen = set()
+    for line in lines:
+        cidr = line.split("/")[0]
+        try:
+            net = ipaddress.ip_network(line, strict=False)
+        except ValueError:
+            net = ipaddress.ip_network(f"{cidr}/32", strict=False)
+        for ip in net.hosts():
+            key = str(ip)
+            if key not in seen:
+                seen.add(key)
+                candidate_ips.append(key)
+            if len(candidate_ips) >= CFIP_CAP:
+                break
+        if len(candidate_ips) >= CFIP_CAP:
+            break
+
+    nodes = [f"{ip}:{CFIP_PORT}#CF" for ip in candidate_ips]
+    print(f"[cf-pool] 生成 CF 官方候选节点 {len(nodes)} 个 (端口 {CFIP_PORT})。")
+    return nodes
 
 # =========================== IP 地区校准模块 ===========================
 class IpInfoAsync:
@@ -1061,10 +1129,9 @@ def check_http_server(node_str, timeout, max_retries, retry_delay, method, conne
                 "timeout": (connect_timeout, timeout),
                 "verify": False,
                 "allow_redirects": False,
-                "headers": headers
+                "headers": headers,
+                "proxies": {"http": None, "https": None}
             }
-            if FORCE_DIRECT:
-                request_kwargs["proxies"] = {"http": None, "https": None}
 
             if method.upper() == "HEAD":
                 resp = requests.head(url, **request_kwargs)
@@ -1213,6 +1280,7 @@ def measure_bandwidth_curl(node_str):
         "-L",
         "-H", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
         "--http2",
+        "--noproxy", "*",
         "--resolve", f"speed.cloudflare.com:{port}:{ip}",
         "--connect-timeout", str(BANDWIDTH_CONNECT_TIMEOUT),
         "--max-time", str(BANDWIDTH_TIMEOUT),
@@ -1655,6 +1723,19 @@ def main():
                     seen.add(key)
                     nodes.append(n)
     print(f"合并后总计 {len(nodes)} 个节点。")
+
+    if CFIP_ENABLED:
+        cfip_nodes = run_cfip_scan()
+        if cfip_nodes:
+            print("[cf-pool] 与外部数据源合并节点池中...")
+            original = set(n.split('#')[0] for n in nodes)
+            for node in cfip_nodes:
+                key = node.split(':')[0]
+                if key in original:
+                    continue
+                original.add(key)
+                nodes.append(node)
+            print(f"合并 CF 官方池后总计 {len(nodes)} 个节点。")
 
     token_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), IP_CALIBRATION_TOKEN_FILE)
     cache_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), IP_CALIBRATION_CACHE_FILE)
